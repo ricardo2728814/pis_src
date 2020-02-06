@@ -6,6 +6,12 @@ const ERR_EEXIST = 'EEXIST'
 
 const STUDENT_ID = 2728814
 
+try {
+    fs.mkdirSync(path.join(__dirname, 'output'))
+} catch (err) {
+    if (err.code !== ERR_EEXIST) throw err
+}
+
 /**
  * 
  * @param {string} data 

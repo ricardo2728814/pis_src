@@ -1,11 +1,16 @@
 const fs = require('fs')
 const path = require('path')
-const stream = require('stream')
 const HTML_FILES_DIR_NAME = 'Files'
 const HTML_FILES_LOCATION = path.join(__dirname, HTML_FILES_DIR_NAME)
 const ERR_EEXIST = 'EEXIST'
 
 const STUDENT_ID = 2728814
+
+try {
+    fs.mkdirSync(path.join(__dirname, 'output'))
+} catch (err) {
+    if (err.code !== ERR_EEXIST) throw err
+}
 
 /**
  * 
