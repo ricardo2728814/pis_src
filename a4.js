@@ -65,8 +65,14 @@ const listWords = async text => {
     }
 }
 
+/**
+ * 
+ * @param {string} filesLocation location of the HTML documents
+ * @param {string} outputFilesLocation location for the generated files
+ * @param {*} outputStream the write stream for the log file
+ */
 const a4 = async (filesLocation, outputFilesLocation, outputStream) => {
-    let t_operation_total = 0
+    let t_operation_total = 0 // This will be the sum for the time taken to generate each file
     const a3_main = async () => {
         try {
             await fs.promises.mkdir(outputFilesLocation)
@@ -85,7 +91,7 @@ const a4 = async (filesLocation, outputFilesLocation, outputStream) => {
                 listWords(file_noHTML).then(async wordList => {
                     await fs.promises.writeFile(
                         path.join(outputFilesLocation, fileName + ".txt"),
-                        wordList.join('\n').toLowerCase()
+                        wordList.join('\n').toLowerCase() // The whole document is set to lowecase
                     )
                 })
             )
