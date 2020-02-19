@@ -45,6 +45,21 @@ const measureTime = async taskP => {
 }
 
 /**
+ * Measures the time taken to complete a Promise in nanoseconds
+ * @param {Promise} nano A Promise to measure
+ * @returns
+ */
+const measureTime_nano = async taskP => {
+    const t_begin = process.hrtime.bigint()
+    const result = await taskP
+    const t_end = process.hrtime.bigint()
+    return {
+        time: t_end - t_begin,
+        result
+    }
+}
+
+/**
  * Lists the words of a given text
  * @param {string} text 
  * @returns {Promise<string[]>}
@@ -111,7 +126,7 @@ const dumpTokensToDictionary = async (dictionary, words) => {
  * @param {*} outputStream the write stream for the log file
  */
 const main = async (documentsDir, outputDir, outputStream) => {
-    let t_operation_total = 0 // This will be the sum for the time taken to generate each file
+    let t_operation_total_ns = 0n // This will be the sum for the time taken to generate each file
     const global_dictionary = {} // All the tokens from all the files
     const global_dictionary_operations = []
 
@@ -146,10 +161,10 @@ const main = async (documentsDir, outputDir, outputStream) => {
                     dictionaryFile
                 )
             }
-            const timedResult = await measureTime(operation())
-            const log = `${fileName}\t${timedResult.time / 1000} s.\n`
+            const timedResult = await measureTime_nano(operation())
+            const log = `${fileName}\t${Number(timedResult.time) / 1000000000} s.\n`
             outputStream.write(log)
-            t_operation_total += timedResult.time
+            t_operation_total_ns += timedResult.time
         }
         await Promise.all(global_dictionary_operations) // Wait for any dumping to the global dictionary
         const dictionaryFile_g = Object.keys(global_dictionary)
@@ -169,7 +184,7 @@ const main = async (documentsDir, outputDir, outputStream) => {
         main_sub()
     )
     outputStream.write(
-        `Total operation time:\t${t_operation_total / 1000} s.\n` +
+        `Total operation time:\t${Number(t_operation_total_ns) / 1000000000} s.\n` +
         `Total execution time:\t${timedResult.time / 1000} s.\n`
     )
     outputStream.close()
