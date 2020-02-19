@@ -25,8 +25,9 @@ try {
  * @returns {Promise<string>}
  */
 const removeHTMLTags = async (data) => {
-    const tagRegexp = /<((?=!\-\-)!\-\-[\s\S]*\-\-|((?=\?)\?[\s\S]*\?|((?=\/)\/[^.\-\d][^\/\]'"[!#$%&()*+,;<=>?@^`{|}~ ]*|[^.\-\d][^\/\]'"[!#$%&()*+,;<=>?@^`{|}~ ]*(?:\s[^.\-\d][^\/\]'"[!#$%&()*+,;<=>?@^`{|}~ ]*(?:=(?:"[^"]*"|'[^']*'|[^'"<\s]*))?)*)\s?\/?))>/ig
-    return data.replace(tagRegexp, '')
+    const htmlCommentRegexp = /<!--(.*?)-->/igm
+    const tagRegexp = /<\/*\s*[\w\-]+(\s*[\w\-]+\s*=\s*("([^"]*)"|[\w\n%\-\#\/\.\+,]+|'([^']*)'))*\s*\/*>/igm
+    return data.replace(htmlCommentRegexp, '').replace(tagRegexp, '')
 }
 
 /**
