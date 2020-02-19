@@ -110,13 +110,18 @@ const sortOrder_numeric_desc = (a, b) => b - a
  * @returns {Promise<void>}
  */
 const dumpTokensToDictionary = async (dictionary, words) => {
+    const doc_words = {}
     words.forEach(word => {
         const match = dictionary[word]
         if (match) {
             dictionary[word].times++
+            if (!doc_words[word]) {
+                dictionary[word].docs++
+            }
         } else {
-            dictionary[word] = { times: 1 }
+            dictionary[word] = { times: 1, docs: 1 }
         }
+        doc_words[word] = true
     })
 }
 
@@ -129,8 +134,6 @@ const dumpTokensToDictionary = async (dictionary, words) => {
 const main = async (documentsDir, outputDir, outputStream) => {
     let t_operation_total_ns = 0n // This will be the sum for the time taken to generate each file
     const global_dictionary = {} // All the tokens from all the files
-    const global_dictionary_operations = []
-
     const main_sub = async () => {
         try {
             await fs.promises.mkdir(outputDir)
@@ -148,32 +151,19 @@ const main = async (documentsDir, outputDir, outputStream) => {
                 const file_noHTML = await removeHTMLTags(file.toString())
                 let words = await listWords(file_noHTML)
                 words = words.map(word => word.toLowerCase()) // Set the words to lowercase
-                const dictionary = {}
-                await dumpTokensToDictionary(dictionary, words)
-                global_dictionary_operations.push(
-                    dumpTokensToDictionary(global_dictionary, words) // Do not wait for this
-                )
-                const dictionaryFile = Object.keys(dictionary)
-                    .sort(sortOrder_alphabetic)
-                    .map(token => `${token}\t${dictionary[token].times}`)
-                    .join('\n')
-                await fs.promises.writeFile(
-                    path.join(outputDir, `${fileName}.txt`),
-                    dictionaryFile
-                )
+                await dumpTokensToDictionary(global_dictionary, words)
             }
             const timedResult = await measureTime_nano(operation())
             const log = `${fileName}\t${Number(timedResult.time) / 1000000000} s.\n`
             outputStream.write(log)
             t_operation_total_ns += timedResult.time
         }
-        await Promise.all(global_dictionary_operations) // Wait for any dumping to the global dictionary
         const dictionaryFile_g = Object.keys(global_dictionary)
             .sort((tokenA, tokenB) => sortOrder_numeric_desc(
                 global_dictionary[tokenA].times,
                 global_dictionary[tokenB].times
             ))
-            .map(token => `${token}\t${global_dictionary[token].times}`)
+            .map(token => `${token}\t${global_dictionary[token].times}\t${global_dictionary[token].docs}`)
             .join('\n')
 
         await fs.promises.writeFile(
@@ -193,6 +183,6 @@ const main = async (documentsDir, outputDir, outputStream) => {
 
 main(
     HTML_FILES_LOCATION,
-    path.join(__dirname, 'output', `a5`),
-    fs.createWriteStream(path.join(__dirname, 'output', `a5_${STUDENT_ID}.txt`))
+    path.join(__dirname, 'output', `a6`),
+    fs.createWriteStream(path.join(__dirname, 'output', `a6_${STUDENT_ID}.txt`))
 )
