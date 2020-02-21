@@ -1,3 +1,4 @@
+// @ts-check
 const fs = require('fs')
 const path = require('path')
 const HTML_FILES_DIR_NAME = 'Files'
@@ -47,7 +48,7 @@ const measureTime = async taskP => {
 
 /**
  * Measures the time taken to complete a Promise in nanoseconds
- * @param {Promise} nano A Promise to measure
+ * @param {Promise} taskP A Promise to measure
  * @returns
  */
 const measureTime_nano = async taskP => {
@@ -105,25 +106,44 @@ const sortOrder_numeric_desc = (a, b) => b - a
 
 /**
  * Generates and dumps the tokens into the dictionary
- * @param {{[token:string]: {times: number}}} dictionary Where the tokens will be dumped
+ * @param {TokenMap} dictionary Where the tokens will be dumped
  * @param {string[]} words Words used to generate the tokens
+ * @param {string} fileName Name of the file used
  * @returns {Promise<void>}
  */
-const dumpTokensToDictionary = async (dictionary, words) => {
-    const doc_words = {}
-    words.forEach(word => {
-        const match = dictionary[word]
-        if (match) {
-            dictionary[word].times++
-            if (!doc_words[word]) {
-                dictionary[word].docs++
-            }
-        } else {
-            dictionary[word] = { times: 1, docs: 1 }
+const dumpTokensToDictionary = async (dictionary, words, fileName) => {
+    for (let word of words) {
+        const hasWord = dictionary.get(word)
+        if (!hasWord) {
+            dictionary.set(word, { files: new Map(), postingIndex: -1 })
         }
-        doc_words[word] = true
-    })
+        const hasFile = dictionary.get(word).files.get(fileName)
+        if (hasFile) {
+            dictionary.get(word).files.get(fileName).frequency++
+        } else {
+            dictionary.get(word).files.set(fileName, { frequency: 1 })
+        }
+    }
 }
+
+/**
+ * Generates the Posting Array
+ * @param {PostingArray} posting Where the posting data will be dumped
+ * @param {TokenMap} tokenDictionary
+ * @returns {Promise<void>}
+ */
+const dumpPostingToArray = async (posting, tokenDictionary) => {
+    for (let [token, data] of tokenDictionary) {
+        const postingIndex = posting.length // Index does not exist, will be created later
+
+        for (let [fileName, fileData] of data.files) {
+            posting.push({ fileName, frequency: fileData.frequency })
+        }
+        tokenDictionary.get(token).postingIndex = postingIndex
+    }
+}
+
+
 
 /**
  * 
@@ -132,8 +152,12 @@ const dumpTokensToDictionary = async (dictionary, words) => {
  * @param {*} outputStream the write stream for the log file
  */
 const main = async (documentsDir, outputDir, outputStream) => {
+    // @ts-ignore
     let t_operation_total_ns = 0n // This will be the sum for the time taken to generate each file
-    const global_dictionary = {} // All the tokens from all the files
+    /**
+     * @type {TokenMap} global_dictionary Includes all the tokens from all the files
+     */
+    const global_dictionary = new Map()
     const main_sub = async () => {
         try {
             await fs.promises.mkdir(outputDir)
@@ -144,31 +168,38 @@ const main = async (documentsDir, outputDir, outputStream) => {
         }
 
         const fileList = await fs.promises.readdir(documentsDir)
-        for (let i = 0; i < fileList.length; i++) {
-            const fileName = fileList[i]
+        for (let fileName of fileList) {
             const operation = async () => {
                 const file = await fs.promises.readFile(path.join(documentsDir, fileName))
                 const file_noHTML = await removeHTMLTags(file.toString())
                 let words = await listWords(file_noHTML)
                 words = words.map(word => word.toLowerCase()) // Set the words to lowercase
-                await dumpTokensToDictionary(global_dictionary, words)
+                await dumpTokensToDictionary(global_dictionary, words, fileName)
             }
             const timedResult = await measureTime_nano(operation())
             const log = `${fileName}\t${Number(timedResult.time) / 1000000000} s.\n`
             outputStream.write(log)
             t_operation_total_ns += timedResult.time
         }
-        const dictionaryFile_g = Object.keys(global_dictionary)
-            .sort((tokenA, tokenB) => sortOrder_numeric_desc(
-                global_dictionary[tokenA].times,
-                global_dictionary[tokenB].times
-            ))
-            .map(token => `${token}\t${global_dictionary[token].times}\t${global_dictionary[token].docs}`)
+        /**
+         * @type {PostingArray}
+         */
+        const posting_data = [] // Might be global in the future
+        await dumpPostingToArray(posting_data, global_dictionary)
+        const posting_file = posting_data
+            .map(postData => `${postData.fileName}\t${postData.frequency}`)
+            .join('\n')
+        const tokens_file = Array.from(global_dictionary.keys())
+            .map(token => `${token}\t${global_dictionary.get(token).files.size}\t${global_dictionary.get(token).postingIndex}`)
             .join('\n')
 
         await fs.promises.writeFile(
-            path.join(outputDir, "_tokens.txt"),
-            dictionaryFile_g
+            path.join(outputDir, "posting.txt"),
+            posting_file
+        )
+        await fs.promises.writeFile(
+            path.join(outputDir, "tokens.txt"),
+            tokens_file
         )
     }
     const timedResult = await measureTime(
@@ -183,6 +214,32 @@ const main = async (documentsDir, outputDir, outputStream) => {
 
 main(
     HTML_FILES_LOCATION,
-    path.join(__dirname, 'output', `a6`),
-    fs.createWriteStream(path.join(__dirname, 'output', `a6_${STUDENT_ID}.txt`))
+    path.join(__dirname, 'output', `a7`),
+    fs.createWriteStream(path.join(__dirname, 'output', `a7_${STUDENT_ID}.txt`))
 )
+
+/** TYPES */
+/**
+ * @typedef {object} FileUsageData
+ * @property {number} frequency
+ *
+ * @typedef {object} TokenData
+ * @property {FileUsageMap} files
+ * @property {number} postingIndex This token's first index of the posting array
+ *
+ * @typedef {Map<string,FileUsageData>} FileUsageMap
+ *
+ * @typedef {Map<string, TokenData>} TokenMap
+ *
+ * @typedef {object} PostingData
+ * @property {string} fileName
+ * @property {number} frequency
+ *
+ * @typedef {PostingData[]} PostingArray
+ *
+ * @typedef {object} SimpleTokenData
+ * @property {number} postingIndex This token's first index of the posting array
+ * @property {number} docs Number of documents with this token
+ *
+ * @typedef {Map<string,SimpleTokenData>} SimpleTokenMap
+ */
