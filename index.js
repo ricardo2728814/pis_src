@@ -127,6 +127,19 @@ const dumpTokensToDictionary = async (dictionary, words, fileName) => {
 }
 
 /**
+ * 
+ * @param {string} text Text to create the stop list from, words should be separated with a valid regex /s
+ * @param {StopListMap} stopLMap Map to dump the keys and values to
+ */
+const createStopListMap = async (text, stopLMap) => {
+    const cleanTxt = text.replace(/\r/g, '')
+    const words = cleanTxt.split(/\s/)
+    for (let word of words) {
+        stopLMap.set(word, true)
+    }
+}
+
+/**
  * Generates the Posting Array
  * @param {PostingArray} posting Where the posting data will be dumped
  * @param {TokenMap} tokenDictionary
@@ -154,6 +167,7 @@ const dumpPostingToArray = async (posting, tokenDictionary) => {
 const main = async (documentsDir, outputDir, outputStream) => {
     // @ts-ignore
     let t_operation_total_ns = 0n // This will be the sum for the time taken to generate each file
+    const MIN_TOKEN_REPS = 3
     /**
      * @type {TokenMap} global_dictionary Includes all the tokens from all the files
      */
@@ -180,6 +194,35 @@ const main = async (documentsDir, outputDir, outputStream) => {
             const log = `${fileName}\t${Number(timedResult.time) / 1000000000} s.\n`
             outputStream.write(log)
             t_operation_total_ns += timedResult.time
+        }
+        /**
+         * @type {StopListMap}
+         */
+        const stopLMap = new Map()
+        const stoplist_text = await fs.promises.readFile(path.join(__dirname, 'stoplist.txt'))
+        await createStopListMap(stoplist_text.toString(), stopLMap)
+        for (let word of stopLMap.keys()) {
+            // We'll just delete every word from the stop list, no need to check
+            global_dictionary.delete(word)
+        }
+        for (let token of global_dictionary.keys()) {
+            // Here we'll perform filter any tokens
+            if (token.length <= 1) {
+                global_dictionary.delete(token)
+                continue
+            }
+            const tokenData = global_dictionary.get(token)
+            let reps = 0
+            for (let fileData of tokenData.files.values()) {
+                reps += fileData.frequency
+                if (reps >= MIN_TOKEN_REPS) {
+                    break
+                }
+            }
+            if (reps < MIN_TOKEN_REPS) {
+                global_dictionary.delete(token)
+                continue
+            }
         }
         /**
          * @type {PostingArray}
@@ -212,7 +255,7 @@ const main = async (documentsDir, outputDir, outputStream) => {
     outputStream.close()
 }
 
-const ACT = `a8`
+const ACT = `a9`
 main(
     HTML_FILES_LOCATION,
     path.join(__dirname, 'output', ACT),
@@ -243,4 +286,6 @@ main(
  * @property {number} docs Number of documents with this token
  *
  * @typedef {Map<string,SimpleTokenData>} SimpleTokenMap
+ *
+ * @typedef {Map<string,boolean>} StopListMap
  */
