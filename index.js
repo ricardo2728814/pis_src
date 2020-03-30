@@ -212,10 +212,11 @@ const main = async (documentsDir, outputDir, outputStream) => {
     outputStream.close()
 }
 
+const ACT = `a8`
 main(
     HTML_FILES_LOCATION,
-    path.join(__dirname, 'output', `a7`),
-    fs.createWriteStream(path.join(__dirname, 'output', `a7_${STUDENT_ID}.txt`))
+    path.join(__dirname, 'output', ACT),
+    fs.createWriteStream(path.join(__dirname, 'output', `${ACT}_${STUDENT_ID}.txt`))
 )
 
 /** TYPES */
