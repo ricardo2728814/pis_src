@@ -140,17 +140,28 @@ const createStopListMap = async (text, stopLMap) => {
 }
 
 /**
+ * 
+ * @param {FileUsageData} fileData
+ * @param {number} tokensOnDoc
+ * @returns {Promise<number>}
+ */
+const calculateWeight = async (fileData, tokensOnDoc) => {
+    return (fileData.frequency * 100) / tokensOnDoc
+}
+
+/**
  * Generates the Posting Array
  * @param {PostingArray} posting Where the posting data will be dumped
  * @param {TokenMap} tokenDictionary
+ * @param {Map<string,number>} docsTokens
  * @returns {Promise<void>}
  */
-const dumpPostingToArray = async (posting, tokenDictionary) => {
+const dumpPostingToArray = async (posting, tokenDictionary, docsTokens) => {
     for (let [token, data] of tokenDictionary) {
         const postingIndex = posting.length // Index does not exist, will be created later
 
         for (let [fileName, fileData] of data.files) {
-            posting.push({ fileName, frequency: fileData.frequency })
+            posting.push({ fileName, weight: await calculateWeight(fileData, docsTokens.get(fileName)) })
         }
         tokenDictionary.get(token).postingIndex = postingIndex
     }
@@ -172,6 +183,10 @@ const main = async (documentsDir, outputDir, outputStream) => {
      * @type {TokenMap} global_dictionary Includes all the tokens from all the files
      */
     const global_dictionary = new Map()
+    /**
+     * @type {Map<string,number>} doc -> number of tokens
+     */
+    const global_docs_tokens_qt = new Map()
     const main_sub = async () => {
         try {
             await fs.promises.mkdir(outputDir)
@@ -205,13 +220,12 @@ const main = async (documentsDir, outputDir, outputStream) => {
             // We'll just delete every word from the stop list, no need to check
             global_dictionary.delete(word)
         }
-        for (let token of global_dictionary.keys()) {
+        for (let [token, tokenData] of global_dictionary) {
             // Here we'll perform filter any tokens
             if (token.length <= 1) {
                 global_dictionary.delete(token)
                 continue
             }
-            const tokenData = global_dictionary.get(token)
             let reps = 0
             for (let fileData of tokenData.files.values()) {
                 reps += fileData.frequency
@@ -223,14 +237,23 @@ const main = async (documentsDir, outputDir, outputStream) => {
                 global_dictionary.delete(token)
                 continue
             }
+            // Create a doc -> reps map
+            for (let [doc, usage] of tokenData.files) {
+                const qtTokens = global_docs_tokens_qt.get(doc)
+                if (qtTokens) {
+                    global_docs_tokens_qt.set(doc, qtTokens + usage.frequency)
+                } else {
+                    global_docs_tokens_qt.set(doc, usage.frequency)
+                }
+            }
         }
         /**
          * @type {PostingArray}
          */
         const posting_data = [] // Might be global in the future
-        await dumpPostingToArray(posting_data, global_dictionary)
+        await dumpPostingToArray(posting_data, global_dictionary, global_docs_tokens_qt)
         const posting_file = posting_data
-            .map(postData => `${postData.fileName}\t${postData.frequency}`)
+            .map(postData => `${postData.fileName}\t${postData.weight}`)
             .join('\n')
         const tokens_file = Array.from(global_dictionary.keys())
             .map(token => `${token}\t${global_dictionary.get(token).files.size}\t${global_dictionary.get(token).postingIndex}`)
@@ -255,7 +278,7 @@ const main = async (documentsDir, outputDir, outputStream) => {
     outputStream.close()
 }
 
-const ACT = `a9`
+const ACT = `a10`
 main(
     HTML_FILES_LOCATION,
     path.join(__dirname, 'output', ACT),
@@ -277,7 +300,7 @@ main(
  *
  * @typedef {object} PostingData
  * @property {string} fileName
- * @property {number} frequency
+ * @property {number} weight
  *
  * @typedef {PostingData[]} PostingArray
  *
