@@ -108,20 +108,20 @@ const sortOrder_numeric_desc = (a, b) => b - a
  * Generates and dumps the tokens into the dictionary
  * @param {TokenMap} dictionary Where the tokens will be dumped
  * @param {string[]} words Words used to generate the tokens
- * @param {string} fileName Name of the file used
+ * @param {number} fileID Name of the file used
  * @returns {Promise<void>}
  */
-const dumpTokensToDictionary = async (dictionary, words, fileName) => {
+const dumpTokensToDictionary = async (dictionary, words, fileID) => {
     for (let word of words) {
         const hasWord = dictionary.get(word)
         if (!hasWord) {
             dictionary.set(word, { files: new Map(), postingIndex: -1 })
         }
-        const hasFile = dictionary.get(word).files.get(fileName)
+        const hasFile = dictionary.get(word).files.get(fileID)
         if (hasFile) {
-            dictionary.get(word).files.get(fileName).frequency++
+            dictionary.get(word).files.get(fileID).frequency++
         } else {
-            dictionary.get(word).files.set(fileName, { frequency: 1 })
+            dictionary.get(word).files.set(fileID, { frequency: 1 })
         }
     }
 }
@@ -153,15 +153,15 @@ const calculateWeight = async (fileData, tokensOnDoc) => {
  * Generates the Posting Array
  * @param {PostingArray} posting Where the posting data will be dumped
  * @param {TokenMap} tokenDictionary
- * @param {Map<string,number>} docsTokens
+ * @param {DocumentTokenCountMap} docsTokens
  * @returns {Promise<void>}
  */
 const dumpPostingToArray = async (posting, tokenDictionary, docsTokens) => {
     for (let [token, data] of tokenDictionary) {
         const postingIndex = posting.length // Index does not exist, will be created later
 
-        for (let [fileName, fileData] of data.files) {
-            posting.push({ fileName, weight: await calculateWeight(fileData, docsTokens.get(fileName)) })
+        for (let [fileID, fileData] of data.files) {
+            posting.push({ fileID, weight: await calculateWeight(fileData, docsTokens.get(fileID)) })
         }
         tokenDictionary.get(token).postingIndex = postingIndex
     }
@@ -184,9 +184,13 @@ const main = async (documentsDir, outputDir, outputStream) => {
      */
     const global_dictionary = new Map()
     /**
-     * @type {Map<string,number>} doc -> number of tokens
+     * @type {DocumentTokenCountMap} doc -> number of tokens
      */
     const global_docs_tokens_qt = new Map()
+    /**
+     * @type {DocumentsIndex}
+     */
+    const global_docs_index = new Map()
     const main_sub = async () => {
         try {
             await fs.promises.mkdir(outputDir)
@@ -197,13 +201,17 @@ const main = async (documentsDir, outputDir, outputStream) => {
         }
 
         const fileList = await fs.promises.readdir(documentsDir)
+        let docs_current_index = -1 // Starts at 0
         for (let fileName of fileList) {
+            docs_current_index++
+            global_docs_index.set(docs_current_index, fileName)
+            const fileID = docs_current_index
             const operation = async () => {
                 const file = await fs.promises.readFile(path.join(documentsDir, fileName))
                 const file_noHTML = await removeHTMLTags(file.toString())
                 let words = await listWords(file_noHTML)
                 words = words.map(word => word.toLowerCase()) // Set the words to lowercase
-                await dumpTokensToDictionary(global_dictionary, words, fileName)
+                await dumpTokensToDictionary(global_dictionary, words, fileID)
             }
             const timedResult = await measureTime_nano(operation())
             const log = `${fileName}\t${Number(timedResult.time) / 1000000000} s.\n`
@@ -252,13 +260,21 @@ const main = async (documentsDir, outputDir, outputStream) => {
          */
         const posting_data = [] // Might be global in the future
         await dumpPostingToArray(posting_data, global_dictionary, global_docs_tokens_qt)
+        const sFileName = fileID => global_docs_index.get(fileID)
         const posting_file = posting_data
-            .map(postData => `${postData.fileName}\t${postData.weight}`)
+            .map(postData => `${postData.fileID}\t${postData.weight}`)
             .join('\n')
         const tokens_file = Array.from(global_dictionary.keys())
             .map(token => `${token}\t${global_dictionary.get(token).files.size}\t${global_dictionary.get(token).postingIndex}`)
             .join('\n')
+        const documents_o_file = Array.from(global_docs_index.keys())
+            .map(fileID => `${fileID}\t${sFileName(fileID)}`)
+            .join('\n')
 
+        await fs.promises.writeFile(
+            path.join(outputDir, "documents.txt"),
+            documents_o_file
+        )
         await fs.promises.writeFile(
             path.join(outputDir, "posting.txt"),
             posting_file
@@ -278,7 +294,7 @@ const main = async (documentsDir, outputDir, outputStream) => {
     outputStream.close()
 }
 
-const ACT = `a10`
+const ACT = `a11`
 main(
     HTML_FILES_LOCATION,
     path.join(__dirname, 'output', ACT),
@@ -294,12 +310,12 @@ main(
  * @property {FileUsageMap} files
  * @property {number} postingIndex This token's first index of the posting array
  *
- * @typedef {Map<string,FileUsageData>} FileUsageMap
+ * @typedef {Map<DocumentID,FileUsageData>} FileUsageMap
  *
  * @typedef {Map<string, TokenData>} TokenMap
  *
  * @typedef {object} PostingData
- * @property {string} fileName
+ * @property {DocumentID} fileID
  * @property {number} weight
  *
  * @typedef {PostingData[]} PostingArray
@@ -311,4 +327,11 @@ main(
  * @typedef {Map<string,SimpleTokenData>} SimpleTokenMap
  *
  * @typedef {Map<string,boolean>} StopListMap
+ *
+ * @typedef {string} DocumentName
+ * @typedef {Map<number, DocumentName>} DocumentsIndex
+ *
+ * @typedef {number} DocumentID
+ *
+ * @typedef {Map<DocumentID,number>} DocumentTokenCountMap
  */
