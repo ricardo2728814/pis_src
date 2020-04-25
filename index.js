@@ -10,8 +10,11 @@ const OUTPUT_FOLDER = path.join(__dirname, 'output')
 const STUDENT_ID = 2728814
 const ACT = `a12`
 const MIN_TOKEN_REPS = 2
+const MAX_TOKEN_LENGTH = 32
+const STRING_ENCODING = 'utf8'
 let STOP_LIST_ENABLED = true
 let INTERACTIVE_MODE = false
+let USE_MEMORY = false
 
 /**
  * Create a folder for the output
@@ -34,6 +37,9 @@ const readParams = () => {
                 break;
             case '-nostoplist':
                 STOP_LIST_ENABLED = false
+                break;
+            case '-memory':
+                USE_MEMORY = true
                 break;
             default:
                 console.log(`Unknown: ${command}`)
@@ -209,12 +215,236 @@ const dumpPostingToArray = async (posting, tokenDictionary, docsTokens) => {
 }
 
 /**
- * Updates the data used by the REPL
- * @param {TokenMap} tokens 
- * @param {PostingArray} posting 
- * @param {DocumentsIndex} documents 
+ * @class
+ * @template TKey
+ * @template TValue
  */
-let updateRepl = (tokens, posting, documents) => { }
+class RMap {
+    /**
+     * @param {Map<TKey, TValue>} data
+    */
+    constructor(data) {
+        this.dataSet = data
+    }
+
+    /**@type {Map<TKey, TValue>}*/
+    dataSet = new Map()
+
+    /**@param {TKey} key */
+    get = async (key) => this.dataSet.get(key)
+
+}
+
+/**
+ * @class
+ * @template TKey
+ * @template TValue
+ */
+class PMap {
+
+    /**@type {Map<TKey, TValue>}*/
+    dataSet = new Map()
+
+    /**@param {TKey} key */
+    get = async (key) => this.dataSet.get(key)
+
+}
+
+/**
+ * 
+ * @param {PISData} data 
+ */
+const dumpToFiles = async data => {
+    let streams = []
+    // Documents
+    const docs_file = path.join(OUTPUT_FOLDER, 'documents.pis.bin')
+    let wStream = fs.createWriteStream(docs_file, { flags: 'w' })
+    data.documents.forEach((docName) => {
+        const bFileName = Buffer.alloc(32)
+        bFileName.write(docName)
+
+        wStream.write(bFileName)
+    })
+    wStream.close()
+    streams.push(new Promise(fulfill => wStream.on("finish", fulfill)))
+
+    // Posting
+    const posting_file = path.join(OUTPUT_FOLDER, 'posting.pis.bin')
+    wStream = fs.createWriteStream(posting_file, { flags: 'w' })
+    data.posting.forEach((postData) => {
+        const bID = Buffer.alloc(4)
+        const bWeight = Buffer.alloc(8)
+        bID.writeInt32BE(postData.fileID)
+        bWeight.writeDoubleBE(postData.weight)
+
+        wStream.write(bID)
+        wStream.write(bWeight)
+    })
+    wStream.close()
+    streams.push(new Promise(fulfill => wStream.on("finish", fulfill)))
+
+    // Tokens
+    const tokens_file = path.join(OUTPUT_FOLDER, 'tokens.pis.bin')
+    wStream = fs.createWriteStream(tokens_file, { flags: 'w' })
+    data.tokens.forEach((tokenData, tokenName) => {
+        const bTokenName = Buffer.alloc(32)
+        const bDocsNumber = Buffer.alloc(4)
+        const bPostingIndex = Buffer.alloc(4)
+        const writtenBytesTokenName = bTokenName.write(tokenName)
+        if (writtenBytesTokenName === 32) throw "TOKEN REACHED MAX SIZE"
+        bDocsNumber.writeInt32BE(tokenData.docs)
+        bPostingIndex.writeInt32BE(tokenData.postingIndex)
+
+        wStream.write(bTokenName)
+        wStream.write(bDocsNumber)
+        wStream.write(bPostingIndex)
+    })
+    wStream.close()
+    streams.push(new Promise(fulfill => wStream.on("finish", fulfill)))
+
+    /**
+     * TokenToIndex
+     * @type {Map<string, number>}
+     */
+    const tokenToIndexMap = new Map()
+    Array.from(data.tokens.keys()).forEach((token, i) => tokenToIndexMap.set(token, i))
+
+    // Readers
+
+    /**
+     * 
+     * @param {string} tokenName 
+     */
+    const getToken = async tokenName => {
+        let tokenNameClean = tokenName.toLowerCase()
+        const bTokenName = Buffer.alloc(32)
+        const bDocsNumber = Buffer.alloc(4)
+        const bPostingIndex = Buffer.alloc(4)
+        const index = tokenToIndexMap.get(tokenNameClean)
+        if (typeof index !== 'number') {
+            return
+        }
+        const row = (32 + 4 + 4) * index
+
+        const fd = await fs.promises.open(tokens_file, 'r')
+        await fd.read(bTokenName, 0, 32, row)
+        await fd.read(bDocsNumber, 0, 4, row + 32)
+        await fd.read(bPostingIndex, 0, 4, row + 36)
+        fd.close() // wait?
+
+        const tokenStringLength = bTokenName.indexOf(0x0)
+        const tokenString = bTokenName.toString(STRING_ENCODING, 0, tokenStringLength)
+        if (tokenString !== tokenNameClean) throw `Token matching error ${tokenNameClean} -> ${tokenString}`
+        const docs = bDocsNumber.readInt32BE()
+        const postingIndex = bPostingIndex.readInt32BE()
+        /**@type {SimpleTokenData} */
+        const tokenData = { docs, postingIndex }
+        return tokenData
+    }
+
+    /**
+     * 
+     * @param {number} index 
+     */
+    const getPosting = async index => {
+        const bID = Buffer.alloc(4)
+        const bWeight = Buffer.alloc(8)
+
+        const row = (4 + 8) * index
+
+        const fd = await fs.promises.open(posting_file, 'r')
+        await fd.read(bID, 0, 4, row)
+        await fd.read(bWeight, 0, 8, row + 4)
+        fd.close() // wait?
+
+        const fileID = bID.readInt32BE()
+        const weight = bWeight.readDoubleBE()
+
+        /**@type {PostingData} */
+        const postingData = { fileID, weight }
+        return postingData
+    }
+
+    /**
+     * 
+     * @param {number} index 
+     */
+    const getDoc = async index => {
+        const bFileName = Buffer.alloc(32)
+
+        const fd = await fs.promises.open(docs_file, 'r')
+        await fd.read(bFileName, 0, 32, index * 32)
+        fd.close()
+        const stringLength = bFileName.indexOf(0x0)
+        const docName = bFileName.toString(STRING_ENCODING, 0, stringLength)
+        return docName
+    }
+
+    await Promise.all(streams)
+
+    let documents = new PMap()
+    documents.get = getDoc
+    let posting = new PMap()
+    posting.get = getPosting
+    let tokens = new PMap
+    tokens.get = getToken
+
+    /**@type {PISDataMap} */
+    const DataMap = {
+        documents,
+        posting,
+        tokens
+    }
+    return DataMap
+}
+
+const createDatabase = () => {
+    const db = {}
+
+    /**@type {PISDataMap} */
+    let pisData
+
+    /**@param {PISDataRaw} data */
+    db.setData = async data => {
+        /**@type {PostingMap} */
+        const posting = new Map()
+
+        /**@type {SimpleTokenMap} */
+        const tokens = new Map()
+
+        data.posting.forEach((el, i) => posting.set(i, el))
+        data.tokens.forEach((tokenData, key) => {
+            tokens.set(key, {
+                postingIndex: tokenData.postingIndex,
+                docs: tokenData.files.size
+            })
+        })
+        if (USE_MEMORY) {
+            pisData = {
+                documents: new RMap(data.documents),
+                posting: new RMap(posting),
+                tokens: new RMap(tokens)
+            }
+        } else {
+            pisData = await dumpToFiles({
+                documents: data.documents,
+                posting,
+                tokens
+            })
+        }
+    }
+
+    db.transfer = async () => {
+
+    }
+
+    db.getData = async () => {
+        return pisData
+    }
+    return db
+}
+const database = createDatabase()
+
 /**
  * Creates a REPL instance in its own context
  */
@@ -223,44 +453,39 @@ let startRepl = () => { }
  * Create REPL context
  */
 const createReplContext = () => {
-    /**
-     * @type {repl.REPLServer}
-     */
+    /**@type {repl.REPLServer}*/
     let replInstance
-    /**
-     * @type {TokenMap}
-     */
-    let tokensMap
-    /**
-     * @type {PostingArray}
-     */
-    let postingArray
-    /**
-     * @type {DocumentsIndex}
-     */
-    let documentsIndex
     const pis = {}
-
 
     pis.restart = () => {
         console.log("RUNNING...")
-        run().then(() => console.log("DONE"))
+        run().then(() => {
+            console.log("DONE")
+            startRepl()
+        })
     }
     /**
      * @param {string} word
      */
-    pis.search = (word) => {
+    pis.search = async (word) => {
         const counter = createCounter()
         const wordClean = word.toLowerCase()
-        const match = tokensMap.get(wordClean)
+        const db = await database.getData()
+        const match = await db.tokens.get(wordClean)
         if (!match) {
             console.log("No token found")
             return null
         }
         const iStart = match.postingIndex
-        const iEnd = iStart + match.files.size // Slice is excludes the last index
-        const postingSlice = postingArray.slice(iStart, iEnd)
-        const results = postingSlice.map(data => ({ fileName: documentsIndex.get(data.fileID) }))
+        const iEnd = iStart + match.docs - 1
+        let results = []
+        for (let i = iStart; i <= iEnd; i++) {
+            const fileID = (await db.posting.get(i)).fileID
+            const fileName = await db.documents.get(fileID)
+            results.push(
+                { fileName }
+            )
+        }
         const time = counter.stop()
         Promise.resolve().then(async () => {
             const stream = await fs.createWriteStream(path.join(OUTPUT_FOLDER, ACT, "search.txt"), { flags: 'a' })
@@ -268,10 +493,12 @@ const createReplContext = () => {
             for (let result of results) {
                 searchLog += `\t${result.fileName}\n`
             }
+            searchLog += `\tStorage: ${USE_MEMORY ? "Memory" : "Physical"}\n`
             searchLog += `\tTime: ${ns_to_s(time)} s.\n`
             stream.write(searchLog)
             stream.close()
         })
+        console.log(results)
         return results
     }
     startRepl = async () => {
@@ -282,11 +509,6 @@ const createReplContext = () => {
         Object.assign(replInstance.context, { pis })
     }
 
-    updateRepl = (tokens, posting, documents) => {
-        tokensMap = tokens
-        postingArray = posting
-        documentsIndex = documents
-    }
 }
 createReplContext()
 
@@ -356,6 +578,10 @@ const main = async (documentsDir, outputDir, outputStream) => {
                 global_dictionary.delete(token)
                 continue
             }
+            if (token.length > MAX_TOKEN_LENGTH) {
+                global_dictionary.delete(token)
+                continue
+            }
             let reps = 0
             for (let fileData of tokenData.files.values()) {
                 reps += fileData.frequency
@@ -405,7 +631,12 @@ const main = async (documentsDir, outputDir, outputStream) => {
             path.join(outputDir, "tokens.txt"),
             tokens_file
         )
-        updateRepl(global_dictionary, posting_data, global_docs_index)
+
+        database.setData({
+            documents: global_docs_index,
+            posting: posting_data,
+            tokens: global_dictionary
+        })
     }
     const timedResult = await measureTime(
         main_sub()
@@ -456,4 +687,35 @@ run().then(() => {
  * @typedef {number} NumberOfTokens
  * @typedef {string} DocumentName
  * @typedef {string} TokenString
+ *
+ * @typedef {object} SimpleTokenData
+ * @property {number} postingIndex This token's first index of the posting array
+ * @property {number} docs Number of documents with this token
+ *
+ * @typedef {Map<TokenString,SimpleTokenData>} SimpleTokenMap
+ *
+ * @typedef {Map<number, PostingData>} PostingMap
+ *
+ * @typedef {object} PISDataRaw
+ * @property {TokenMap} tokens
+ * @property {PostingArray} posting
+ * @property {DocumentsIndex} documents
+ *
+ * @typedef {object} PISData
+ * @property {SimpleTokenMap} tokens
+ * @property {PostingMap} posting
+ * @property {DocumentsIndex} documents
+ *
+ * @typedef {object} PISDataMap
+ * @property {AMap<TokenString, SimpleTokenData>} tokens
+ * @property {AMap<number, PostingData>} posting
+ * @property {AMap<DocumentID, DocumentName>} documents
+ *
+ */
+
+/**
+ * @typedef {RMap<TMKey, TMValue> | PMap<TMKey, TMValue>} AMap
+ * @template TMKey
+ * @template TMValue
+ *
  */
