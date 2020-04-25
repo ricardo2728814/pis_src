@@ -8,6 +8,9 @@ const ERR_EEXIST = 'EEXIST'
 const MSG_ERR_FOLDER_CREATION = folder => `Failed to make directory ${folder}.`
 const OUTPUT_FOLDER = path.join(__dirname, 'output')
 const STUDENT_ID = 2728814
+const ACT = `a12`
+let STOP_LIST_ENABLED = true
+let INTERACTIVE_MODE = false
 
 /**
  * Create a folder for the output
@@ -20,6 +23,24 @@ try {
         throw err
     }
 }
+
+const readParams = () => {
+    const commands = process.argv.slice(2)
+    for (let command of commands) {
+        switch (command) {
+            case '-i':
+                INTERACTIVE_MODE = true
+                break;
+            case '-nostoplist':
+                STOP_LIST_ENABLED = false
+                break;
+            default:
+                console.log(`Unknown: ${command}`)
+                break;
+        }
+    }
+}
+readParams()
 
 /**
  * Removes HTML tags
@@ -61,6 +82,24 @@ const measureTime_nano = async taskP => {
         result
     }
 }
+
+/**
+ *  Creates a sync counter
+ */
+const createCounter = () => {
+    const t_begin = process.hrtime.bigint()
+    const stop = () => {
+        const t_end = process.hrtime.bigint()
+        return t_end - t_begin
+    }
+    return { stop }
+}
+
+/**
+ * 
+ * @param {bigint} ns 
+ */
+const ns_to_s = (ns) => Number(ns) / 1000000000
 
 /**
  * Lists the words of a given text
@@ -168,9 +207,17 @@ const dumpPostingToArray = async (posting, tokenDictionary, docsTokens) => {
     }
 }
 
-
-let updateRepl = async () => { }
-let startRepl = async () => { }
+/**
+ * Updates the data used by the REPL
+ * @param {TokenMap} tokens 
+ * @param {PostingArray} posting 
+ * @param {DocumentsIndex} documents 
+ */
+let updateRepl = (tokens, posting, documents) => { }
+/**
+ * Creates a REPL instance in its own context
+ */
+let startRepl = () => { }
 /**
  * Create REPL context
  */
@@ -179,19 +226,65 @@ const createReplContext = () => {
      * @type {repl.REPLServer}
      */
     let replInstance
-    const state = {}
-    state.restart = () => {
+    /**
+     * @type {TokenMap}
+     */
+    let tokensMap
+    /**
+     * @type {PostingArray}
+     */
+    let postingArray
+    /**
+     * @type {DocumentsIndex}
+     */
+    let documentsIndex
+    const pis = {}
+
+
+    pis.restart = () => {
         console.log("RUNNING...")
         run().then(() => console.log("DONE"))
     }
-    startRepl = async () => {
-        if (!replInstance) {
-            replInstance = repl.start('>')
+    /**
+     * @param {string} word
+     */
+    pis.search = (word) => {
+        const counter = createCounter()
+        const wordClean = word.toLowerCase()
+        const match = tokensMap.get(wordClean)
+        if (!match) {
+            console.log("No token found")
+            return null
         }
-        Object.assign(replInstance.context, state)
+        const iStart = match.postingIndex
+        const iEnd = iStart + match.files.size // Slice is excludes the last index
+        const postingSlice = postingArray.slice(iStart, iEnd)
+        const results = postingSlice.map(data => ({ fileName: documentsIndex.get(data.fileID) }))
+        const time = counter.stop()
+        Promise.resolve().then(async () => {
+            const stream = await fs.createWriteStream(path.join(OUTPUT_FOLDER, ACT, "search.txt"), { flags: 'a' })
+            let searchLog = `Search: ${word}\n`
+            for (let result of results) {
+                searchLog += `\t${result.fileName}\n`
+            }
+            searchLog += `\tTime: ${ns_to_s(time)} s.\n`
+            stream.write(searchLog)
+            stream.close()
+        })
+        return results
     }
-    updateRepl = async () => {
+    startRepl = async () => {
+        console.log("REPL Started")
+        if (!replInstance) {
+            replInstance = repl.start('> ')
+        }
+        Object.assign(replInstance.context, { pis })
+    }
 
+    updateRepl = (tokens, posting, documents) => {
+        tokensMap = tokens
+        postingArray = posting
+        documentsIndex = documents
     }
 }
 createReplContext()
@@ -241,7 +334,7 @@ const main = async (documentsDir, outputDir, outputStream) => {
                 await dumpTokensToDictionary(global_dictionary, words, fileID)
             }
             const timedResult = await measureTime_nano(operation())
-            const log = `${fileName}\t${Number(timedResult.time) / 1000000000} s.\n`
+            const log = `${fileName}\t${ns_to_s(timedResult.time)} s.\n`
             outputStream.write(log)
             t_operation_total_ns += timedResult.time
         }
@@ -251,9 +344,11 @@ const main = async (documentsDir, outputDir, outputStream) => {
         const stopLMap = new Map()
         const stoplist_text = await fs.promises.readFile(path.join(__dirname, 'stoplist.txt'))
         await createStopListMap(stoplist_text.toString(), stopLMap)
-        for (let word of stopLMap.keys()) {
-            // We'll just delete every word from the stop list, no need to check
-            global_dictionary.delete(word)
+        if (STOP_LIST_ENABLED) {
+            for (let word of stopLMap.keys()) {
+                // We'll just delete every word from the stop list, no need to check
+                global_dictionary.delete(word)
+            }
         }
         for (let [token, tokenData] of global_dictionary) {
             // Here we'll perform filter any tokens
@@ -310,6 +405,7 @@ const main = async (documentsDir, outputDir, outputStream) => {
             path.join(outputDir, "tokens.txt"),
             tokens_file
         )
+        updateRepl(global_dictionary, posting_data, global_docs_index)
     }
     const timedResult = await measureTime(
         main_sub()
@@ -321,7 +417,6 @@ const main = async (documentsDir, outputDir, outputStream) => {
     outputStream.close()
 }
 
-const ACT = `a12`
 const run = () => main(
     HTML_FILES_LOCATION,
     path.join(__dirname, 'output', ACT),
@@ -329,11 +424,8 @@ const run = () => main(
 )
 
 run().then(() => {
-    const command = process.argv[2]
-    switch (command) {
-        case '-i':
-            startRepl()
-            break;
+    if (INTERACTIVE_MODE) {
+        startRepl()
     }
 })
 
@@ -348,7 +440,7 @@ run().then(() => {
  *
  * @typedef {Map<DocumentID,FileUsageData>} FileUsageMap
  *
- * @typedef {Map<string, TokenData>} TokenMap
+ * @typedef {Map<TokenString, TokenData>} TokenMap
  *
  * @typedef {object} PostingData
  * @property {DocumentID} fileID
@@ -356,18 +448,12 @@ run().then(() => {
  *
  * @typedef {PostingData[]} PostingArray
  *
- * @typedef {object} SimpleTokenData
- * @property {number} postingIndex This token's first index of the posting array
- * @property {number} docs Number of documents with this token
- *
- * @typedef {Map<string,SimpleTokenData>} SimpleTokenMap
- *
  * @typedef {Map<string,boolean>} StopListMap
- *
- * @typedef {string} DocumentName
- * @typedef {Map<number, DocumentName>} DocumentsIndex
+ * @typedef {Map<DocumentID, DocumentName>} DocumentsIndex
+ * @typedef {Map<DocumentID,NumberOfTokens>} DocumentTokenCountMap
  *
  * @typedef {number} DocumentID
- *
- * @typedef {Map<DocumentID,number>} DocumentTokenCountMap
+ * @typedef {number} NumberOfTokens
+ * @typedef {string} DocumentName
+ * @typedef {string} TokenString
  */
