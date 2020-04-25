@@ -1,6 +1,7 @@
 // @ts-check
 const fs = require('fs')
 const path = require('path')
+const repl = require('repl')
 const HTML_FILES_DIR_NAME = 'Files'
 const HTML_FILES_LOCATION = path.join(__dirname, HTML_FILES_DIR_NAME)
 const ERR_EEXIST = 'EEXIST'
@@ -168,6 +169,32 @@ const dumpPostingToArray = async (posting, tokenDictionary, docsTokens) => {
 }
 
 
+let updateRepl = async () => { }
+let startRepl = async () => { }
+/**
+ * Create REPL context
+ */
+const createReplContext = () => {
+    /**
+     * @type {repl.REPLServer}
+     */
+    let replInstance
+    const state = {}
+    state.restart = () => {
+        console.log("RUNNING...")
+        run().then(() => console.log("DONE"))
+    }
+    startRepl = async () => {
+        if (!replInstance) {
+            replInstance = repl.start('>')
+        }
+        Object.assign(replInstance.context, state)
+    }
+    updateRepl = async () => {
+
+    }
+}
+createReplContext()
 
 /**
  * 
@@ -294,12 +321,21 @@ const main = async (documentsDir, outputDir, outputStream) => {
     outputStream.close()
 }
 
-const ACT = `a11`
-main(
+const ACT = `a12`
+const run = () => main(
     HTML_FILES_LOCATION,
     path.join(__dirname, 'output', ACT),
     fs.createWriteStream(path.join(__dirname, 'output', `${ACT}_${STUDENT_ID}.txt`))
 )
+
+run().then(() => {
+    const command = process.argv[2]
+    switch (command) {
+        case '-i':
+            startRepl()
+            break;
+    }
+})
 
 /** TYPES */
 /**
