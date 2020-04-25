@@ -9,6 +9,7 @@ const MSG_ERR_FOLDER_CREATION = folder => `Failed to make directory ${folder}.`
 const OUTPUT_FOLDER = path.join(__dirname, 'output')
 const STUDENT_ID = 2728814
 const ACT = `a12`
+const MIN_TOKEN_REPS = 2
 let STOP_LIST_ENABLED = true
 let INTERACTIVE_MODE = false
 
@@ -298,7 +299,6 @@ createReplContext()
 const main = async (documentsDir, outputDir, outputStream) => {
     // @ts-ignore
     let t_operation_total_ns = 0n // This will be the sum for the time taken to generate each file
-    const MIN_TOKEN_REPS = 3
     /**
      * @type {TokenMap} global_dictionary Includes all the tokens from all the files
      */
