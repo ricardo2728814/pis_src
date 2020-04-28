@@ -2,6 +2,8 @@
 const fs = require('fs')
 const path = require('path')
 const repl = require('repl')
+const http = require('http')
+
 const HTML_FILES_DIR_NAME = 'Files'
 const HTML_FILES_LOCATION = path.join(__dirname, HTML_FILES_DIR_NAME)
 const ERR_EEXIST = 'EEXIST'
@@ -15,6 +17,7 @@ const STRING_ENCODING = 'utf8'
 let STOP_LIST_ENABLED = true
 let INTERACTIVE_MODE = false
 let USE_MEMORY = false
+let CREATE_SERVER = false
 
 /**
  * Create a folder for the output
@@ -40,6 +43,9 @@ const readParams = () => {
                 break;
             case '-memory':
                 USE_MEMORY = true
+                break;
+            case '-server':
+                CREATE_SERVER = true
                 break;
             default:
                 console.log(`Unknown: ${command}`)
@@ -529,6 +535,20 @@ const createReplContext = () => {
 createReplContext()
 
 /**
+ * Starts an HTTP server
+ */
+const startServer = () => {
+    http.createServer((req, res) => {
+        if (req.url = "/")
+            res.end("HELLO WORLD")
+        else
+            res.end()
+    }).listen(80, '0.0.0.0', () => {
+        console.log("Server started on localhost")
+    })
+}
+
+/**
  * 
  * @param {string} documentsDir location of the HTML documents
  * @param {string} outputDir location for the generated files
@@ -673,6 +693,9 @@ const run = () => main(
 run().then(() => {
     if (INTERACTIVE_MODE) {
         startRepl()
+    }
+    if (CREATE_SERVER) {
+        startServer()
     }
 })
 
