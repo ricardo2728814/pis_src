@@ -8,7 +8,7 @@ const ERR_EEXIST = 'EEXIST'
 const MSG_ERR_FOLDER_CREATION = folder => `Failed to make directory ${folder}.`
 const OUTPUT_FOLDER = path.join(__dirname, 'output')
 const STUDENT_ID = 2728814
-const ACT = `a12`
+const ACT = `a13`
 const MIN_TOKEN_REPS = 2
 const MAX_TOKEN_LENGTH = 32
 const STRING_ENCODING = 'utf8'
@@ -465,31 +465,47 @@ const createReplContext = () => {
         })
     }
     /**
-     * @param {string} word
+     * @param {string} words
      */
-    pis.search = async (word) => {
+    pis.search = async (words) => {
         const counter = createCounter()
-        const wordClean = word.toLowerCase()
+        const cleanWords = words.split(" ").map(word => word.toLowerCase())
         const db = await database.getData()
-        const match = await db.tokens.get(wordClean)
-        if (!match) {
-            console.log("No token found")
-            return null
+        /**@type {Map<string, number>} */
+        const resultMap = new Map()
+        for (let word of cleanWords) {
+            const match = await db.tokens.get(word)
+            if (!match) continue;
+
+            const iStart = match.postingIndex
+            const iEnd = iStart + match.docs - 1
+
+            for (let i = iStart; i <= iEnd; i++) {
+                const currentPosting = await db.posting.get(i)
+                const fileID = currentPosting.fileID
+                const weight = currentPosting.weight
+                const fileName = await db.documents.get(fileID)
+                const mapEl = resultMap.get(fileName)
+                if (mapEl == undefined) {
+                    resultMap.set(fileName, weight)
+                } else {
+                    resultMap.set(fileName, weight + mapEl)
+                }
+            }
         }
-        const iStart = match.postingIndex
-        const iEnd = iStart + match.docs - 1
-        let results = []
-        for (let i = iStart; i <= iEnd; i++) {
-            const fileID = (await db.posting.get(i)).fileID
-            const fileName = await db.documents.get(fileID)
-            results.push(
-                { fileName }
-            )
-        }
+
+        let results = Array.from(resultMap.entries())
+            .map(entry => ({
+                fileName: entry[0],
+                weight: entry[1]
+            }))
+            .sort((a, b) => sortOrder_numeric_desc(a.weight, b.weight))
+            .slice(0, 10)
+
         const time = counter.stop()
         Promise.resolve().then(async () => {
             const stream = await fs.createWriteStream(path.join(OUTPUT_FOLDER, ACT, "search.txt"), { flags: 'a' })
-            let searchLog = `Search: ${word}\n`
+            let searchLog = `Search: ${words}\n`
             for (let result of results) {
                 searchLog += `\t${result.fileName}\n`
             }
