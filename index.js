@@ -10,7 +10,7 @@ const ERR_EEXIST = 'EEXIST'
 const MSG_ERR_FOLDER_CREATION = folder => `Failed to make directory ${folder}.`
 const OUTPUT_FOLDER = path.join(__dirname, 'output')
 const STUDENT_ID = 2728814
-const ACT = `a13`
+const ACT = `a14`
 const MIN_TOKEN_REPS = 2
 const MAX_TOKEN_LENGTH = 32
 const STRING_ENCODING = 'utf8'
