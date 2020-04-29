@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>Not Google</title>
+    <style>
+        body {
+            margin: 0 !important;
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            user-select: none;
+            text-align: center;
+            align-items: center;
+        }
+
+        .terminated {
+            background-image: url("./notgoogle.png");
+            width: 100%;
+            min-height: 100px;
+            background-size: contain;
+            background-repeat: no-repeat;
+            background-position: center;
+            margin-top: 200px;
+            margin-bottom: 40px;
+        }
+
+        input {
+            width: 80%;
+            margin-bottom: 40px;
+            max-width: 650px;
+        }
+
+        button {
+            height: 40px;
+            width: 20vw;
+            max-width: 300px;
+            vertical-align: middle;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="terminated"></div>
+    <form method="GET" action="search.html" style="display: flex; width: 100%; flex-direction: column; align-items: center;" >
+        <input name="q" type="text" />
+        <div>
+            <button type="submit">Buscar</button>
+            <button type="submit">Me siento con suerte</button>
+        </div>
+    </form>
+</body>
+
+</html>

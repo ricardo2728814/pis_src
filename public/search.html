@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>Not Google</title>
+    <style>
+        body {
+            margin: 0 !important;
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            user-select: none;
+            font-size: 1.2em;
+        }
+
+        .terminated {
+            background-image: url("./notgoogle.png");
+            width: 100px;
+            min-height: 40px;
+            background-size: contain;
+            background-repeat: no-repeat;
+            background-position: center;
+            margin-right: 20px;
+        }
+
+        .result {
+            padding-left: 140px;
+            width: 100%;
+            box-sizing: border-box;
+            display: flex;
+            flex-direction: column;
+            padding-bottom: 30px;
+        }
+
+
+        h3 {
+            text-decoration: none;
+            margin: 0 !important;
+        }
+
+        p {
+            margin: 0 !important;
+        }
+
+        .header {
+            box-sizing: border-box;
+            display: flex;
+            flex-direction: row;
+            align-items: center;
+
+            padding-top: 20px;
+            padding-left: 12px;
+        }
+
+        #desc {
+            padding-left: 120px;
+            padding-bottom: 40px;
+            display: none;
+        }
+
+        #template {
+            display: none;
+        }
+    </style>
+
+</head>
+
+<body>
+    <div class="header">
+        <a href="/index.html"><div class="terminated"></div></a>
+        <form method="GET" action="search.html">
+            <input id="searchbar" name="q" type="text" />
+            <button type="submit">Buscar</button>
+        </form>
+
+    </div>
+    <p id="desc">Resultados: 10</p>
+
+    <div id="template" class="result">
+        <h3><a href="/index.html">file.html</a></h3>
+        <p>47.000</p>
+    </div>
+    <script>
+        function init() {
+            const apiFetch = new Promise((resolve, reject) => {
+                var oReq = new XMLHttpRequest();
+                oReq.addEventListener("load", () => {
+                    resolve(
+                        JSON.parse(oReq.responseText)
+                    )
+                });
+                oReq.open("GET", `/api/search${window.location.search}`);
+                oReq.send();
+            })
+            document.body.onload = async () => {
+                var urlParams = new URLSearchParams(window.location.search);
+                const hasQ = urlParams.has('q')
+                if (hasQ) {
+                    const searched = urlParams.get("q")
+                    document.getElementById('searchbar').value = searched
+                }
+
+                const data = await apiFetch
+                const resultEl = document.getElementById('desc')
+                resultEl.innerHTML = `Resultados: ${data.length}`
+                resultEl.style = "display: block;"
+
+                const template = document.getElementById('template')
+                data.forEach(el => {
+                    const newItem = template.cloneNode(true)
+                    newItem.style = "display: block;"
+                    const link = newItem.querySelector('h3 > a')
+                    link.innerHTML = el.fileName
+                    link.href = `/files/${el.fileName}`
+                    newItem.querySelector('p').innerHTML = el.weight
+                    document.body.appendChild(newItem)
+                })
+            }
+
+        }
+        init()
+    </script>
+</body>
+
+</html>

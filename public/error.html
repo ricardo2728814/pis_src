@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>Not Google</title>
+    <style>
+        body {
+            margin: 0 !important;
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            background-color: rgb(22, 22, 32);
+            color: red;
+            user-select: none;
+            text-align: center;
+            font-size: 3em;
+            font-family: monospace;
+        }
+
+        .terminated {
+            background-image: url("./terminated.gif");
+            width: 90%;
+            min-height: 400px;
+            background-size: contain;
+            background-repeat: no-repeat;
+            background-position: center;
+        }
+    </style>
+</head>
+
+<body>
+    <h2 id="error">ERROR</h2>
+    <div id="image" class="terminated" style="display: none;"></div>
+    <h1>TERMINATED</h1>
+    <script>
+        document.body.onload = () => {
+            const image = document.getElementById("image")
+            image.style = "display: block"
+
+            var urlParams = new URLSearchParams(window.location.search);
+            if (urlParams.has('e')) {
+                const errorTitle = document.getElementById("error")
+                errorTitle.innerHTML = `ERROR ${urlParams.get('e')}`
+            }
+
+        }
+    </script>
+</body>
+
+</html>

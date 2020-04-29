@@ -3,9 +3,11 @@ const fs = require('fs')
 const path = require('path')
 const repl = require('repl')
 const http = require('http')
+const querystring = require('querystring')
 
 const HTML_FILES_DIR_NAME = 'Files'
 const HTML_FILES_LOCATION = path.join(__dirname, HTML_FILES_DIR_NAME)
+const PUBLIC_FOLDER = path.join(__dirname, 'public')
 const ERR_EEXIST = 'EEXIST'
 const MSG_ERR_FOLDER_CREATION = folder => `Failed to make directory ${folder}.`
 const OUTPUT_FOLDER = path.join(__dirname, 'output')
@@ -452,6 +454,60 @@ const createDatabase = () => {
 const database = createDatabase()
 
 /**
+  * @param {string} words
+  */
+const search = async (words) => {
+    const counter = createCounter()
+    const cleanWords = words.split(" ").map(word => word.toLowerCase())
+    const db = await database.getData()
+    /**@type {Map<string, number>} */
+    const resultMap = new Map()
+    for (let word of cleanWords) {
+        const match = await db.tokens.get(word)
+        if (!match) continue;
+
+        const iStart = match.postingIndex
+        const iEnd = iStart + match.docs - 1
+
+        for (let i = iStart; i <= iEnd; i++) {
+            const currentPosting = await db.posting.get(i)
+            const fileID = currentPosting.fileID
+            const weight = currentPosting.weight
+            const fileName = await db.documents.get(fileID)
+            const mapEl = resultMap.get(fileName)
+            if (mapEl == undefined) {
+                resultMap.set(fileName, weight)
+            } else {
+                resultMap.set(fileName, weight + mapEl)
+            }
+        }
+    }
+
+    let results = Array.from(resultMap.entries())
+        .map(entry => ({
+            fileName: entry[0],
+            weight: entry[1]
+        }))
+        .sort((a, b) => sortOrder_numeric_desc(a.weight, b.weight))
+        .slice(0, 10)
+
+    const time = counter.stop()
+    Promise.resolve().then(async () => {
+        const stream = await fs.createWriteStream(path.join(OUTPUT_FOLDER, ACT, "search.txt"), { flags: 'a' })
+        let searchLog = `Search: ${words}\n`
+        for (let result of results) {
+            searchLog += `\t${result.fileName}\n`
+        }
+        searchLog += `\tStorage: ${USE_MEMORY ? "Memory" : "Physical"}\n`
+        searchLog += `\tTime: ${ns_to_s(time)} s.\n`
+        stream.write(searchLog)
+        stream.close()
+    })
+
+    return results
+}
+
+/**
  * Creates a REPL instance in its own context
  */
 let startRepl = () => { }
@@ -470,58 +526,13 @@ const createReplContext = () => {
             startRepl()
         })
     }
+
     /**
-     * @param {string} words
-     */
+      * @param {string} words
+      */
     pis.search = async (words) => {
-        const counter = createCounter()
-        const cleanWords = words.split(" ").map(word => word.toLowerCase())
-        const db = await database.getData()
-        /**@type {Map<string, number>} */
-        const resultMap = new Map()
-        for (let word of cleanWords) {
-            const match = await db.tokens.get(word)
-            if (!match) continue;
-
-            const iStart = match.postingIndex
-            const iEnd = iStart + match.docs - 1
-
-            for (let i = iStart; i <= iEnd; i++) {
-                const currentPosting = await db.posting.get(i)
-                const fileID = currentPosting.fileID
-                const weight = currentPosting.weight
-                const fileName = await db.documents.get(fileID)
-                const mapEl = resultMap.get(fileName)
-                if (mapEl == undefined) {
-                    resultMap.set(fileName, weight)
-                } else {
-                    resultMap.set(fileName, weight + mapEl)
-                }
-            }
-        }
-
-        let results = Array.from(resultMap.entries())
-            .map(entry => ({
-                fileName: entry[0],
-                weight: entry[1]
-            }))
-            .sort((a, b) => sortOrder_numeric_desc(a.weight, b.weight))
-            .slice(0, 10)
-
-        const time = counter.stop()
-        Promise.resolve().then(async () => {
-            const stream = await fs.createWriteStream(path.join(OUTPUT_FOLDER, ACT, "search.txt"), { flags: 'a' })
-            let searchLog = `Search: ${words}\n`
-            for (let result of results) {
-                searchLog += `\t${result.fileName}\n`
-            }
-            searchLog += `\tStorage: ${USE_MEMORY ? "Memory" : "Physical"}\n`
-            searchLog += `\tTime: ${ns_to_s(time)} s.\n`
-            stream.write(searchLog)
-            stream.close()
-        })
+        const results = await search(words)
         console.log(results)
-        return results
     }
     startRepl = async () => {
         console.log("REPL Started")
@@ -539,10 +550,58 @@ createReplContext()
  */
 const startServer = () => {
     http.createServer((req, res) => {
-        if (req.url = "/")
-            res.end("HELLO WORLD")
-        else
-            res.end()
+        const urlQueryStart = req.url.indexOf('?')
+        const isApi = req.url.indexOf('/api') > -1
+        let url = req.url
+        if (urlQueryStart > 0) {
+            url = req.url.slice(0, urlQueryStart)
+        }
+        if (isApi) {
+            if (url === "/api/search" && req.method === "GET") {
+                // console.log(req.url)
+                new Promise(async (resolve, reject) => {
+                    const query = req.url.slice(urlQueryStart + 1)
+                    let words = querystring.parse(query).q
+                    if (typeof words === 'string') {
+                        const results = await search(words)
+                        res.setHeader('content-type', 'application/json')
+                        res.end(JSON.stringify(results))
+                        resolve()
+                    } else {
+                        reject('Bad params')
+                    }
+                }).catch(err => {
+                    console.log(err)
+                    res.writeHead(400, 'RIP')
+                    res.end()
+                })
+            }
+        } else {
+            const isDocRequest = req.url.indexOf("/files") === 0
+            if (url === "/" || url === "") {
+                url = "index.html"
+            }
+            const targetFile = isDocRequest ?
+                path.join(
+                    HTML_FILES_LOCATION,
+                    path.join("/", url.slice(6))
+                ) :
+                path.join(
+                    PUBLIC_FOLDER,
+                    path.join("/", url)
+                )
+            const fileStream = fs.createReadStream(targetFile)
+            fileStream.on('open', () => {
+                fileStream.pipe(res)
+            })
+
+            fileStream.on('error', () => {
+                res.writeHead(301,
+                    { Location: `/error.html?e=${404}` }
+                );
+                res.end();
+            })
+        }
     }).listen(80, '0.0.0.0', () => {
         console.log("Server started on localhost")
     })
